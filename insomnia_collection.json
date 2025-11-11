@@ -1,0 +1,186 @@
+{
+  "_type": "export",
+  "__export_format": 4,
+  "__export_date": "2025-11-10T00:00:00.000Z",
+  "__export_source": "insomnia.desktop:2025.5.0",
+  "resources": [
+    {
+      "_id": "wrk_todo_nested",
+      "_type": "workspace",
+      "name": "Nested Todo API",
+      "scope": "collection"
+    },
+    {
+      "_id": "env_todo_nested_base",
+      "_type": "environment",
+      "parentId": "wrk_todo_nested",
+      "name": "Base Environment",
+      "data": {
+        "base_url": "http://localhost:3000"
+      }
+    },
+    {
+      "_id": "req_list_todos",
+      "_type": "request",
+      "parentId": "wrk_todo_nested",
+      "name": "List Todos",
+      "method": "GET",
+      "url": "{{ _.base_url }}/api/todos",
+      "body": {},
+      "parameters": [],
+      "headers": [],
+      "authentication": {}
+    },
+    {
+      "_id": "req_get_todo",
+      "_type": "request",
+      "parentId": "wrk_todo_nested",
+      "name": "Get Todo",
+      "method": "GET",
+      "url": "{{ _.base_url }}/api/todos/1",
+      "body": {},
+      "parameters": [],
+      "headers": [],
+      "authentication": {}
+    },
+    {
+      "_id": "req_create_root_todo",
+      "_type": "request",
+      "parentId": "wrk_todo_nested",
+      "name": "Create Root Todo",
+      "method": "POST",
+      "url": "{{ _.base_url }}/api/todos",
+      "body": {
+        "mimeType": "application/json",
+        "text": "{\n  \"title\": \"Plan vacation\",\n  \"description\": \"2026 summer trip planning\",\n  \"startDate\": \"2026-06-01T00:00:00.000Z\",\n  \"endDate\": \"2026-06-15T00:00:00.000Z\"\n}"
+      },
+      "parameters": [],
+      "headers": [
+        {
+          "name": "Content-Type",
+          "value": "application/json"
+        }
+      ],
+      "authentication": {}
+    },
+    {
+      "_id": "req_create_subtodo",
+      "_type": "request",
+      "parentId": "wrk_todo_nested",
+      "name": "Create Subtodo (with image)",
+      "method": "POST",
+      "url": "{{ _.base_url }}/api/todos",
+      "body": {
+        "mimeType": "multipart/form-data",
+        "params": [
+          {
+            "type": "text",
+            "name": "title",
+            "value": "Book flights"
+          },
+          {
+            "type": "text",
+            "name": "parentId",
+            "value": "1"
+          },
+          {
+            "type": "text",
+            "name": "startDate",
+            "value": "2026-05-15T00:00:00.000Z"
+          },
+          {
+            "type": "text",
+            "name": "endDate",
+            "value": "2026-05-20T00:00:00.000Z"
+          },
+          {
+            "type": "file",
+            "name": "image",
+            "fileName": "example.png"
+          }
+        ]
+      },
+      "parameters": [],
+      "headers": [],
+      "authentication": {}
+    },
+    {
+      "_id": "req_update_todo",
+      "_type": "request",
+      "parentId": "wrk_todo_nested",
+      "name": "Update Todo",
+      "method": "PUT",
+      "url": "{{ _.base_url }}/api/todos/1",
+      "body": {
+        "mimeType": "application/json",
+        "text": "{\n  \"description\": \"Updated details\",\n  \"startDate\": \"2026-06-02T00:00:00.000Z\",\n  \"endDate\": \"2026-06-16T00:00:00.000Z\"\n}"
+      },
+      "parameters": [],
+      "headers": [
+        {
+          "name": "Content-Type",
+          "value": "application/json"
+        }
+      ],
+      "authentication": {}
+    },
+    {
+      "_id": "req_update_subtodo_image",
+      "_type": "request",
+      "parentId": "wrk_todo_nested",
+      "name": "Update Subtodo (image)",
+      "method": "PUT",
+      "url": "{{ _.base_url }}/api/todos/2",
+      "body": {
+        "mimeType": "multipart/form-data",
+        "params": [
+          {
+            "type": "text",
+            "name": "title",
+            "value": "Book flights (updated)"
+          },
+          {
+            "type": "file",
+            "name": "image",
+            "fileName": "example.png"
+          }
+        ]
+      },
+      "parameters": [],
+      "headers": [],
+      "authentication": {}
+    },
+    {
+      "_id": "req_update_todo_status",
+      "_type": "request",
+      "parentId": "wrk_todo_nested",
+      "name": "Update Todo Status",
+      "method": "PATCH",
+      "url": "{{ _.base_url }}/api/todos/1/status",
+      "body": {
+        "mimeType": "application/json",
+        "text": "{\n  \"status\": \"IN_PROGRESS\"\n}"
+      },
+      "parameters": [],
+      "headers": [
+        {
+          "name": "Content-Type",
+          "value": "application/json"
+        }
+      ],
+      "authentication": {}
+    },
+    {
+      "_id": "req_delete_todo",
+      "_type": "request",
+      "parentId": "wrk_todo_nested",
+      "name": "Delete Todo",
+      "method": "DELETE",
+      "url": "{{ _.base_url }}/api/todos/1",
+      "body": {},
+      "parameters": [],
+      "headers": [],
+      "authentication": {}
+    }
+  ]
+}
