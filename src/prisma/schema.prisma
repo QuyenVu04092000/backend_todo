@@ -13,17 +13,58 @@ enum TodoStatus {
   DONE
 }
 
-model Todo {
-  id          Int      @id @default(autoincrement())
-  title       String
-  description String?
-  imageUrl    String?
-  startDate   DateTime?
-  endDate     DateTime?
-  status      TodoStatus @default(TODO)
-  parentId    Int?
-  parent      Todo?    @relation("SubTodos", fields: [parentId], references: [id])
-  subtodos    Todo[]   @relation("SubTodos")
-  createdAt   DateTime @default(now())
-  updatedAt   DateTime @updatedAt
+enum TimelineEventType {
+  CREATED
+  UPDATED
+  STATUS_CHANGED
+  TIMELINE_UPDATED
+  IMAGE_UPDATED
+  SUBTODO_ADDED
+  SUBTODO_STATUS_CHANGED
 }
+
+model User {
+  id           Int       @id @default(autoincrement())
+  email        String    @unique
+  passwordHash String
+  name         String?
+  todos        Todo[]
+  timelineEvents TodoTimeline[] @relation("UserTimelineEvents")
+  createdAt    DateTime  @default(now())
+  updatedAt    DateTime  @updatedAt
+}
+
+model Todo {
+  id             Int            @id @default(autoincrement())
+  title          String
+  description    String?
+  imageUrl       String?
+  startDate      DateTime?
+  endDate        DateTime?
+  status         TodoStatus     @default(TODO)
+  userId         Int
+  user           User           @relation(fields: [userId], references: [id], onDelete: Cascade)
+  parentId       Int?
+  parent         Todo?          @relation("SubTodos", fields: [parentId], references: [id], onDelete: Cascade)
+  subtodos       Todo[]         @relation("SubTodos")
+  timelineEvents TodoTimeline[]
+  createdAt      DateTime       @default(now())
+  updatedAt      DateTime       @updatedAt
+
+  @@index([userId])
+  @@index([parentId])
+}
+
+model TodoTimeline {
+  id           Int               @id @default(autoincrement())
+  todoId       Int
+  todo         Todo              @relation(fields: [todoId], references: [id], onDelete: Cascade)
+  type         TimelineEventType
+  message      String
+  actorUserId  Int?
+  actor        User?             @relation("UserTimelineEvents", fields: [actorUserId], references: [id], onDelete: SetNull)
+  createdAt    DateTime          @default(now())
+
+  @@index([todoId])
+}
+

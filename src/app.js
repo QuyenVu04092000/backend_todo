@@ -3,31 +3,36 @@ import cors from "cors";
 import path from "path";
 import { fileURLToPath } from "url";
 
+import authRoutes from "./routes/auth.routes.js";
 import todoRoutes from "./routes/todo.routes.js";
 
 const app = express();
-const __filename = fileURLToPath(import.meta.url);
-const __dirname = path.dirname(__filename);
-const uploadsDir = path.resolve(__dirname, "./uploads");
+const __filename = fileURLToPath( import.meta.url );
+const __dirname = path.dirname( __filename );
+const uploadsDir = path.resolve( __dirname, "./uploads" );
 
-app.use(cors());
-app.use(express.json());
-app.use(express.urlencoded({ extended: true }));
-app.use("/uploads", express.static(uploadsDir));
+app.use( cors() );
+app.use( express.json() );
+app.use( express.urlencoded( { extended: true } ) );
+app.use( "/uploads", express.static( uploadsDir ) );
 
-app.get("/health", (_req, res) => {
-  res.status(200).json({ success: true, data: { uptime: process.uptime() }, message: "OK" });
-});
+app.get( "/health", ( _req, res ) =>
+{
+  res.status( 200 ).json( { success: true, data: { uptime: process.uptime() }, message: "OK" } );
+} );
 
-app.use("/api/todos", todoRoutes);
+app.use( "/api/auth", authRoutes );
+app.use( "/api/todos", todoRoutes );
 
-app.use((req, res, next) => {
-  const error = new Error(`Route ${req.method} ${req.originalUrl} not found`);
+app.use( ( req, res, next ) =>
+{
+  const error = new Error( `Route ${ req.method } ${ req.originalUrl } not found` );
   error.statusCode = 404;
-  next(error);
-});
+  next( error );
+} );
 
-app.use((err, req, res, _next) => {
+app.use( ( err, req, res, _next ) =>
+{
   const statusCode = err.statusCode || 500;
   const response = {
     success: false,
@@ -35,15 +40,17 @@ app.use((err, req, res, _next) => {
     message: err.message || "Internal server error",
   };
 
-  if (err.errors) {
+  if ( err.errors )
+  {
     response.data = err.errors;
   }
 
-  if (process.env.NODE_ENV !== "production" && err.stack) {
+  if ( process.env.NODE_ENV !== "production" && err.stack )
+  {
     response.stack = err.stack;
   }
 
-  res.status(statusCode).json(response);
-});
+  res.status( statusCode ).json( response );
+} );
 
 export default app;
