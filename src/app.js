@@ -1,20 +1,14 @@
 import express from "express";
 import cors from "cors";
-import path from "path";
-import { fileURLToPath } from "url";
 
 import authRoutes from "./routes/auth.routes.js";
 import todoRoutes from "./routes/todo.routes.js";
 
 const app = express();
-const __filename = fileURLToPath( import.meta.url );
-const __dirname = path.dirname( __filename );
-const uploadsDir = path.resolve( __dirname, "./uploads" );
 
 app.use( cors() );
 app.use( express.json() );
 app.use( express.urlencoded( { extended: true } ) );
-app.use( "/uploads", express.static( uploadsDir ) );
 
 app.get( "/health", ( _req, res ) =>
 {

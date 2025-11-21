@@ -4,6 +4,7 @@ import { TimelineEventType } from "@prisma/client";
 import prisma from "../prisma/client.js";
 import { createTimelineEvent } from "../utils/timeline.js";
 import todoEvents from "../events/todoEvents.js";
+import { uploadToSupabase, deleteFromSupabase } from "../utils/supabase.js";
 
 const ensureJwtSecret = () =>
 {
@@ -312,9 +313,21 @@ export const createTodo = async ( req, res, next ) =>
       data.status = parsedStatus;
     }
 
-    if ( req.file )
+    // Only upload to Supabase if a file was actually provided
+    if ( req.file && req.file.buffer && req.file.buffer.length > 0 )
     {
-      data.imageUrl = `/uploads/${ req.file.filename }`;
+      const originalName = req.file.originalname || "image";
+      const uniqueFilename = `${ Date.now() }-${ originalName }`;
+      // Sanitize filename while preserving extension
+      const sanitizedFilename = uniqueFilename.replace( /[^a-zA-Z0-9._-]/g, "_" );
+
+      const { url } = await uploadToSupabase(
+        req.file.buffer,
+        sanitizedFilename,
+        req.file.mimetype || "image/jpeg"
+      );
+
+      data.imageUrl = url;
     }
 
     const created = await prisma.todo.create( {
@@ -382,12 +395,58 @@ export const updateTodo = async ( req, res, next ) =>
       return;
     }
 
-    const { title, description, startDate, endDate } = req.body ?? {};
+    // Extract fields from req.body (FormData fields are parsed as strings)
+    const title = req.body?.title;
+    const description = req.body?.description;
+    const startDate = req.body?.startDate;
+    const endDate = req.body?.endDate;
+    const imageUrl = req.body?.imageUrl;
     const updates = {};
     const changedFields = [];
 
     const isSubtodo = Boolean( existing.parentId );
     let timelineChanged = false;
+
+    // Handle image upload/update/removal
+    if ( req.file && req.file.buffer && req.file.buffer.length > 0 )
+    {
+      // New image uploaded - delete old image if it exists
+      if ( existing.imageUrl )
+      {
+        await deleteFromSupabase( existing.imageUrl );
+      }
+
+      // Upload new image
+      const originalName = req.file.originalname || "image";
+      const uniqueFilename = `${ Date.now() }-${ originalName }`;
+      const sanitizedFilename = uniqueFilename.replace( /[^a-zA-Z0-9._-]/g, "_" );
+
+      const { url } = await uploadToSupabase(
+        req.file.buffer,
+        sanitizedFilename,
+        req.file.mimetype || "image/jpeg"
+      );
+
+      updates.imageUrl = url;
+      changedFields.push( "image" );
+    }
+    else if ( typeof imageUrl !== "undefined" )
+    {
+      // Explicit image removal (imageUrl set to null or empty string)
+      // Handle both string "null" from FormData and actual null/empty string
+      const shouldRemove =
+        imageUrl === null ||
+        imageUrl === "" ||
+        imageUrl === "null" ||
+        String( imageUrl ).trim() === "";
+
+      if ( shouldRemove && existing.imageUrl )
+      {
+        await deleteFromSupabase( existing.imageUrl );
+        updates.imageUrl = null;
+        changedFields.push( "image" );
+      }
+    }
 
     if ( typeof title !== "undefined" )
     {
@@ -499,10 +558,16 @@ export const updateTodo = async ( req, res, next ) =>
 
     if ( changedFields.length > 0 )
     {
+      const message = changedFields.includes( "image" )
+        ? changedFields.filter( ( f ) => f !== "image" ).length > 0
+          ? `Updated ${ changedFields.filter( ( f ) => f !== "image" ).join( ", " ) } and image`
+          : "Image updated"
+        : `Updated ${ changedFields.join( ", " ) }`;
+
       await createTimelineEvent( {
         todoId: id,
         type: TimelineEventType.UPDATED,
-        message: `Updated ${ changedFields.join( ", " ) }`,
+        message,
         actorUserId: userId,
       } );
     }
@@ -793,13 +858,19 @@ export const deleteTodo = async ( req, res, next ) =>
 
     const existing = await prisma.todo.findFirst( {
       where: { id, userId },
-      select: { id: true, parentId: true, title: true },
+      select: { id: true, parentId: true, title: true, imageUrl: true },
     } );
 
     if ( !existing )
     {
       res.status( 404 ).json( { success: false, data: null, message: "Todo not found" } );
       return;
+    }
+
+    // Delete image from Supabase if it exists
+    if ( existing.imageUrl )
+    {
+      await deleteFromSupabase( existing.imageUrl );
     }
 
     await prisma.todo.delete( { where: { id } } );

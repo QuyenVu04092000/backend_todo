@@ -22,7 +22,7 @@ router.post( "/", authenticate, upload.single( "image" ), createTodo );
 router.patch( "/batch-update", authenticate, updateTodoStatusesBatch );
 router.post( "/status/batch", authenticate, updateTodoStatusesBatch );
 router.patch( "/:id/status", authenticate, updateTodoStatus );
-router.patch( "/:id", authenticate, updateTodo );
+router.patch( "/:id", authenticate, upload.single( "image" ), updateTodo );
 router.delete( "/:id", authenticate, deleteTodo );
 
 export default router;
