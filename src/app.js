@@ -3,6 +3,7 @@ import cors from "cors";
 
 import authRoutes from "./routes/auth.routes.js";
 import todoRoutes from "./routes/todo.routes.js";
+import prisma from "./prisma/client.js";
 
 const app = express();
 
@@ -10,12 +11,21 @@ app.use( cors() );
 app.use( express.json() );
 app.use( express.urlencoded( { extended: true } ) );
 
-// Lightweight health check endpoint used for uptime monitoring
-// (e.g. Render free tier, UptimeRobot, or cron-based pings).
-// Intentionally does NOT touch the database or require authentication.
-app.get( "/health", ( _req, res ) =>
+// Health check endpoint used for uptime monitoring (e.g. Render free tier,
+// UptimeRobot, or cron-based pings). Includes a lightweight DB ping to ensure
+// the database is reachable.
+app.get( "/health", async ( _req, res ) =>
 {
-  res.status( 200 ).type( "text/plain" ).send( "ok" );
+  try
+  {
+    // Simple DB connectivity check: SELECT 1
+    await prisma.$queryRaw`SELECT 1`;
+    res.status( 200 ).type( "text/plain" ).send( "ok" );
+  } catch ( error )
+  {
+    // If the DB is not reachable, return 500 so monitoring can alert.
+    res.status( 500 ).type( "text/plain" ).send( "error" );
+  }
 } );
 
 app.use( "/api/auth", authRoutes );
