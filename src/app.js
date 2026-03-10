@@ -10,9 +10,12 @@ app.use( cors() );
 app.use( express.json() );
 app.use( express.urlencoded( { extended: true } ) );
 
+// Lightweight health check endpoint used for uptime monitoring
+// (e.g. Render free tier, UptimeRobot, or cron-based pings).
+// Intentionally does NOT touch the database or require authentication.
 app.get( "/health", ( _req, res ) =>
 {
-  res.status( 200 ).json( { success: true, data: { uptime: process.uptime() }, message: "OK" } );
+  res.status( 200 ).type( "text/plain" ).send( "ok" );
 } );
 
 app.use( "/api/auth", authRoutes );
