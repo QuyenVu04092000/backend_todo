@@ -274,13 +274,22 @@ export const createTodo = async ( req, res, next ) =>
       parentIdentifier = parseTodoId( parentId );
       parentRecord = await prisma.todo.findFirst( {
         where: { id: parentIdentifier, userId },
-        select: { id: true, title: true },
+        select: { id: true, title: true, parentId: true },
       } );
 
       if ( !parentRecord )
       {
         const error = new Error( "Parent todo not found" );
         error.statusCode = 404;
+        throw error;
+      }
+
+      // Subtodos are a flat checklist (like Todoist / MS To Do steps):
+      // only one level of nesting is allowed.
+      if ( parentRecord.parentId )
+      {
+        const error = new Error( "Subtodos cannot have their own subtodos" );
+        error.statusCode = 400;
         throw error;
       }
     }
@@ -378,8 +387,19 @@ export const createTodo = async ( req, res, next ) =>
   }
 };
 
+/**
+ * PATCH /api/todos/:id — single "Save" endpoint for the todo detail screen.
+ *
+ * Accepts any subset of: title, description, startDate, endDate, status,
+ * image (multipart file) / imageUrl ("" | "null" to remove).
+ * Everything is validated first, then the image is uploaded, then all DB
+ * writes (todo + timeline events + DONE cascade) happen in one transaction.
+ * Sending nothing that differs from the stored todo returns 200 unchanged.
+ */
 export const updateTodo = async ( req, res, next ) =>
 {
+  let uploadedImageUrl = null;
+
   try
   {
     const userId = req.user.id;
@@ -395,58 +415,16 @@ export const updateTodo = async ( req, res, next ) =>
       return;
     }
 
-    // Extract fields from req.body (FormData fields are parsed as strings)
-    const title = req.body?.title;
-    const description = req.body?.description;
-    const startDate = req.body?.startDate;
-    const endDate = req.body?.endDate;
-    const imageUrl = req.body?.imageUrl;
+    // FormData fields arrive as strings; JSON bodies may contain null.
+    const { title, description, startDate, endDate, imageUrl } = req.body ?? {};
+    const status = parseStatus( req.body?.status );
+
     const updates = {};
     const changedFields = [];
-
     const isSubtodo = Boolean( existing.parentId );
     let timelineChanged = false;
 
-    // Handle image upload/update/removal
-    if ( req.file && req.file.buffer && req.file.buffer.length > 0 )
-    {
-      // New image uploaded - delete old image if it exists
-      if ( existing.imageUrl )
-      {
-        await deleteFromSupabase( existing.imageUrl );
-      }
-
-      // Upload new image
-      const originalName = req.file.originalname || "image";
-      const uniqueFilename = `${ Date.now() }-${ originalName }`;
-      const sanitizedFilename = uniqueFilename.replace( /[^a-zA-Z0-9._-]/g, "_" );
-
-      const { url } = await uploadToSupabase(
-        req.file.buffer,
-        sanitizedFilename,
-        req.file.mimetype || "image/jpeg"
-      );
-
-      updates.imageUrl = url;
-      changedFields.push( "image" );
-    }
-    else if ( typeof imageUrl !== "undefined" )
-    {
-      // Explicit image removal (imageUrl set to null or empty string)
-      // Handle both string "null" from FormData and actual null/empty string
-      const shouldRemove =
-        imageUrl === null ||
-        imageUrl === "" ||
-        imageUrl === "null" ||
-        String( imageUrl ).trim() === "";
-
-      if ( shouldRemove && existing.imageUrl )
-      {
-        await deleteFromSupabase( existing.imageUrl );
-        updates.imageUrl = null;
-        changedFields.push( "image" );
-      }
-    }
+    // ---- 1. Validate & diff every field (no side effects yet) ----
 
     if ( typeof title !== "undefined" )
     {
@@ -473,7 +451,9 @@ export const updateTodo = async ( req, res, next ) =>
         throw error;
       }
       const normalizedDescription =
-        typeof description === "string" && description.trim() ? description.trim() : null;
+        typeof description === "string" && description.trim() && description.trim() !== "null"
+          ? description.trim()
+          : null;
       if ( normalizedDescription !== existing.description )
       {
         updates.description = normalizedDescription;
@@ -481,32 +461,16 @@ export const updateTodo = async ( req, res, next ) =>
       }
     }
 
-    if ( isSubtodo )
+    // Subtodos are checklist items: they never carry their own timeline.
+    if ( !isSubtodo )
     {
-      if ( typeof startDate !== "undefined" && existing.startDate !== null )
-      {
-        updates.startDate = null;
-        timelineChanged = true;
-      }
+      const sameDate = ( a, b ) =>
+        ( !a && !b ) || ( a && b && a.getTime() === b.getTime() );
 
-      if ( typeof endDate !== "undefined" && existing.endDate !== null )
-      {
-        updates.endDate = null;
-        timelineChanged = true;
-      }
-    }
-    else
-    {
       if ( typeof startDate !== "undefined" )
       {
-        const parsed = parseNullableDate( startDate, "startDate" );
-        const changed =
-          ( parsed && !existing.startDate ) ||
-          ( !parsed && existing.startDate ) ||
-          ( parsed &&
-            existing.startDate &&
-            parsed.getTime() !== existing.startDate.getTime() );
-        if ( changed )
+        const parsed = parseNullableDate( startDate === "null" ? null : startDate, "startDate" );
+        if ( !sameDate( parsed, existing.startDate ) )
         {
           updates.startDate = parsed;
           timelineChanged = true;
@@ -515,86 +479,141 @@ export const updateTodo = async ( req, res, next ) =>
 
       if ( typeof endDate !== "undefined" )
       {
-        const parsed = parseNullableDate( endDate, "endDate" );
-        const changed =
-          ( parsed && !existing.endDate ) ||
-          ( !parsed && existing.endDate ) ||
-          ( parsed &&
-            existing.endDate &&
-            parsed.getTime() !== existing.endDate.getTime() );
-        if ( changed )
+        const parsed = parseNullableDate( endDate === "null" ? null : endDate, "endDate" );
+        if ( !sameDate( parsed, existing.endDate ) )
         {
           updates.endDate = parsed;
           timelineChanged = true;
         }
       }
-
-      if ( timelineChanged )
-      {
-        const nextStart = Object.prototype.hasOwnProperty.call( updates, "startDate" )
-          ? updates.startDate
-          : existing.startDate;
-        const nextEnd = Object.prototype.hasOwnProperty.call( updates, "endDate" )
-          ? updates.endDate
-          : existing.endDate;
-        assertValidTimeline( nextStart, nextEnd );
-      }
     }
 
-    if ( Object.keys( updates ).length === 0 )
+    const nextStart = "startDate" in updates ? updates.startDate : existing.startDate;
+    const nextEnd = "endDate" in updates ? updates.endDate : existing.endDate;
+    if ( timelineChanged )
     {
-      res.status( 400 ).json( {
-        success: false,
-        data: null,
-        message: "No valid fields provided for update",
+      assertValidTimeline( nextStart, nextEnd );
+    }
+
+    const statusChanged = typeof status !== "undefined" && status !== existing.status;
+    if ( statusChanged )
+    {
+      updates.status = status;
+    }
+
+    const hasNewImage = Boolean( req.file?.buffer?.length );
+    const wantsImageRemoval =
+      !hasNewImage &&
+      typeof imageUrl !== "undefined" &&
+      ( imageUrl === null || String( imageUrl ).trim() === "" || imageUrl === "null" ) &&
+      Boolean( existing.imageUrl );
+
+    if ( Object.keys( updates ).length === 0 && !hasNewImage && !wantsImageRemoval )
+    {
+      const { map } = await fetchTodoTreeForUser( userId );
+      res.status( 200 ).json( {
+        success: true,
+        data: map.get( id ),
+        message: "No changes to save",
       } );
       return;
     }
 
-    await prisma.todo.update( {
-      where: { id },
-      data: updates,
-    } );
+    // ---- 2. Upload new image (only after validation passed) ----
 
-    if ( changedFields.length > 0 )
+    if ( hasNewImage )
     {
-      const message = changedFields.includes( "image" )
-        ? changedFields.filter( ( f ) => f !== "image" ).length > 0
-          ? `Updated ${ changedFields.filter( ( f ) => f !== "image" ).join( ", " ) } and image`
-          : "Image updated"
-        : `Updated ${ changedFields.join( ", " ) }`;
-
-      await createTimelineEvent( {
-        todoId: id,
-        type: TimelineEventType.UPDATED,
-        message,
-        actorUserId: userId,
-      } );
+      const originalName = req.file.originalname || "image";
+      const sanitizedFilename = `${ Date.now() }-${ originalName }`.replace( /[^a-zA-Z0-9._-]/g, "_" );
+      const { url } = await uploadToSupabase(
+        req.file.buffer,
+        sanitizedFilename,
+        req.file.mimetype || "image/jpeg"
+      );
+      uploadedImageUrl = url;
+      updates.imageUrl = url;
+      changedFields.push( "image" );
+    }
+    else if ( wantsImageRemoval )
+    {
+      updates.imageUrl = null;
+      changedFields.push( "image" );
     }
 
-    if ( timelineChanged )
-    {
-      const nextStart = Object.prototype.hasOwnProperty.call( updates, "startDate" )
-        ? updates.startDate
-        : existing.startDate;
-      const nextEnd = Object.prototype.hasOwnProperty.call( updates, "endDate" )
-        ? updates.endDate
-        : existing.endDate;
-      const message =
-        nextStart && nextEnd
-          ? `Timeline updated to ${ nextStart.toISOString() } → ${ nextEnd.toISOString() }`
-          : nextStart
-            ? `Timeline updated. Start: ${ nextStart.toISOString() }, no end date`
-            : nextEnd
-              ? `Timeline updated. End: ${ nextEnd.toISOString() }, no start date`
-              : "Timeline cleared";
+    // ---- 3. Apply everything atomically ----
 
-      await createTimelineEvent( {
-        todoId: id,
-        type: TimelineEventType.TIMELINE_UPDATED,
-        message,
-        actorUserId: userId,
-      } );
+    await prisma.$transaction( async ( tx ) =>
+    {
+      await tx.todo.update( { where: { id }, data: updates } );
+
+      const fieldNames = changedFields.filter( ( f ) => f !== "image" );
+      if ( changedFields.length > 0 )
+      {
+        const message = changedFields.includes( "image" )
+          ? fieldNames.length > 0
+            ? `Updated ${ fieldNames.join( ", " ) } and image`
+            : updates.imageUrl ? "Image updated" : "Image removed"
+          : `Updated ${ fieldNames.join( ", " ) }`;
+
+        await createTimelineEvent( {
+          todoId: id,
+          type: changedFields.length === 1 && changedFields[ 0 ] === "image"
+            ? TimelineEventType.IMAGE_UPDATED
+            : TimelineEventType.UPDATED,
+          message,
+          actorUserId: userId,
+          client: tx,
+        } );
+      }
+
+      if ( timelineChanged )
+      {
+        const message =
+          nextStart && nextEnd
+            ? `Timeline updated to ${ nextStart.toISOString() } → ${ nextEnd.toISOString() }`
+            : nextStart
+              ? `Timeline updated. Start: ${ nextStart.toISOString() }, no end date`
+              : nextEnd
+                ? `Timeline updated. End: ${ nextEnd.toISOString() }, no start date`
+                : "Timeline cleared";
+
+        await createTimelineEvent( {
+          todoId: id,
+          type: TimelineEventType.TIMELINE_UPDATED,
+          message,
+          actorUserId: userId,
+          client: tx,
+        } );
+      }
+
+      if ( statusChanged )
+      {
+        await createTimelineEvent( {
+          todoId: id,
+          type: TimelineEventType.STATUS_CHANGED,
+          message: `Status changed from ${ existing.status } to ${ status }`,
+          actorUserId: userId,
+          client: tx,
+        } );
+
+        if ( status === "DONE" )
+        {
+          const descendantIds = await collectDescendantIds( tx, id, userId );
+          if ( descendantIds.length > 0 )
+          {
+            await tx.todo.updateMany( {
+              where: { id: { in: descendantIds } },
+              data: { status },
+            } );
+          }
+        }
+      }
+    } );
+
+    // Old image is only deleted once the DB no longer points at it.
+    if ( "imageUrl" in updates && existing.imageUrl )
+    {
+      await deleteFromSupabase( existing.imageUrl );
     }
 
     const { map } = await fetchTodoTreeForUser( userId );
@@ -615,6 +634,11 @@ export const updateTodo = async ( req, res, next ) =>
     } );
   } catch ( error )
   {
+    // Roll back an image we uploaded if the DB write failed.
+    if ( uploadedImageUrl )
+    {
+      await deleteFromSupabase( uploadedImageUrl ).catch( () => {} );
+    }
     if ( error?.code === "P2025" )
     {
       res.status( 404 ).json( { success: false, data: null, message: "Todo not found" } );

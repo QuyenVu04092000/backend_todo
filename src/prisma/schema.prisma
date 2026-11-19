@@ -30,6 +30,7 @@ model User {
   name         String?
   todos        Todo[]
   timelineEvents TodoTimeline[] @relation("UserTimelineEvents")
+  routines     Routine[]
   createdAt    DateTime  @default(now())
   updatedAt    DateTime  @updatedAt
 }
@@ -68,3 +69,36 @@ model TodoTimeline {
   @@index([todoId])
 }
 
+
+/// A recurring habit/routine (e.g. "Workout" every Mon/Wed/Fri).
+model Routine {
+  id          Int                 @id @default(autoincrement())
+  userId      Int
+  user        User                @relation(fields: [userId], references: [id], onDelete: Cascade)
+  title       String
+  description String?
+  emoji       String?
+  /// Days the routine is scheduled: 0 = Sunday ... 6 = Saturday.
+  daysOfWeek  Int[]               @default([0, 1, 2, 3, 4, 5, 6])
+  /// Optional reminder time in "HH:MM" (24h).
+  timeOfDay   String?
+  isActive    Boolean             @default(true)
+  completions RoutineCompletion[]
+  createdAt   DateTime            @default(now())
+  updatedAt   DateTime            @updatedAt
+
+  @@index([userId])
+}
+
+/// One check-in for a routine on a calendar day (user's local date).
+model RoutineCompletion {
+  id        Int      @id @default(autoincrement())
+  routineId Int
+  routine   Routine  @relation(fields: [routineId], references: [id], onDelete: Cascade)
+  /// Local calendar date "YYYY-MM-DD" chosen by the client.
+  date      String
+  createdAt DateTime @default(now())
+
+  @@unique([routineId, date])
+  @@index([routineId])
+}

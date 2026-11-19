@@ -3,6 +3,7 @@ import cors from "cors";
 
 import authRoutes from "./routes/auth.routes.js";
 import todoRoutes from "./routes/todo.routes.js";
+import routineRoutes from "./routes/routine.routes.js";
 import prisma from "./prisma/client.js";
 
 const app = express();
@@ -11,25 +12,32 @@ app.use( cors() );
 app.use( express.json() );
 app.use( express.urlencoded( { extended: true } ) );
 
-// Health check endpoint used for uptime monitoring (e.g. Render free tier,
-// UptimeRobot, or cron-based pings). Includes a lightweight DB ping to ensure
-// the database is reachable.
-app.get( "/health", async ( _req, res ) =>
+// Lightweight uptime/health endpoint for the Render free tier and external
+// monitors (UptimeRobot, cron-job.org, ...). Same as financial_management_be:
+// - unauthenticated
+// - very fast
+// - does NOT touch the database (a slow/paused DB must not fail the ping)
+app.get( "/health", ( _req, res ) =>
+{
+  res.status( 200 ).type( "text/plain" ).send( "ok" );
+} );
+
+// Optional deeper check that also verifies the database is reachable.
+app.get( "/health/db", async ( _req, res ) =>
 {
   try
   {
-    // Simple DB connectivity check: SELECT 1
     await prisma.$queryRaw`SELECT 1`;
     res.status( 200 ).type( "text/plain" ).send( "ok" );
   } catch ( error )
   {
-    // If the DB is not reachable, return 500 so monitoring can alert.
-    res.status( 500 ).type( "text/plain" ).send( "error" );
+    res.status( 503 ).type( "text/plain" ).send( "db unreachable" );
   }
 } );
 
 app.use( "/api/auth", authRoutes );
 app.use( "/api/todos", todoRoutes );
+app.use( "/api/routines", routineRoutes );
 
 app.use( ( req, res, next ) =>
 {
